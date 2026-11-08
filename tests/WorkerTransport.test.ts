@@ -158,4 +158,30 @@ describe('WorkerTransport', (): void => {
     expect((await asked).message).to.equal('no such game');
     expect(heard).to.deep.equal([{ message: 'no such game' }]);
   });
+
+  it('says so on the error channel when the worker goes quiet while a request waits, with the timers it is given', async (): Promise<void> => {
+    const worker = new FakeWorker(),
+      pending: (() => void)[] = [],
+      timers = {
+        set: (callback: () => void): unknown => pending.push(callback),
+        clear: (): void => {},
+      },
+      transport = transportFor(worker, { timers }),
+      heard: WorkerError[] = [],
+      warn = console.warn;
+
+    transport.receive('workerError', (data) => heard.push(data));
+    worker.say({ channel: 'ready', data: null });
+    transport.request(new Request('topCities'));
+
+    console.warn = () => {};
+
+    try {
+      pending.splice(0).forEach((callback) => callback());
+    } finally {
+      console.warn = warn;
+    }
+
+    expect(heard).to.deep.equal([{ message: '', notAnswering: true }]);
+  });
 });
