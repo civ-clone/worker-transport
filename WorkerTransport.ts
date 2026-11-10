@@ -14,6 +14,9 @@ import AbstractTransport, {
 import DataObject from '@civ-clone/core-data-object/DataObject';
 import reconstituteData from '@civ-clone/core-data-client/reconstituteData';
 
+// What requests waiting on a worker whose script could not be loaded are rejected with.
+export const neverRanMessage = 'The worker could not be loaded.';
+
 /** Something went wrong in the worker, or the page's own word that it has gone quiet while requests wait on it. */
 export type WorkerError = {
   message: string;
@@ -43,6 +46,8 @@ export class WorkerTransport<
   #errorChannel: PropertyKey;
   // Set while the page's own errors go to their listeners, which is not the worker saying anything.
   #passingOn = false;
+  // What the transport itself listens to on the worker, by event, for `dispose` to stop.
+  #own: [string, (event: any) => void][];
 
   constructor(
     worker: Worker,
@@ -58,21 +63,56 @@ export class WorkerTransport<
     this.#rawChannels = new Set(rawChannels);
     this.#errorChannel = errorChannel;
 
-    // Every message from the worker says it is still there (#470).
-    worker.addEventListener('message', (): void => {
-      if (!this.#passingOn) {
-        this.heard();
-      }
-    });
+    this.#own = [
+      // Every message from the worker says it is still there (#470).
+      [
+        'message',
+        (): void => {
+          if (!this.#passingOn) {
+            this.heard();
+          }
+        },
+      ],
+      // An error the worker didn't catch, or a message that couldn't be read, reaches the page only as an event on the
+      //  `Worker`, which nothing would hear (#470).
+      [
+        'error',
+        (event: ErrorEvent): void => {
+          // A script that could not be fetched says so with a bare event: no message, no file, no line. Its worker
+          //  never ran, and will answer nothing (civ-clone/web-renderer#871). Any other error is one the worker
+          //  threw, which says nothing of whether it still runs: one that has yet to post a message may only not
+          //  have been asked anything it answers, so what waits on it goes on waiting, and its silence is timed.
+          const neverRan = !this.heardFrom && !event.message && !event.filename;
 
-    // An error the worker didn't catch, or a message that couldn't be read, reaches the page only as an event on the
-    //  `Worker`, which nothing would hear (#470).
-    worker.addEventListener('error', (event: ErrorEvent): void =>
-      this.#passOn({ message: event.message ?? '' })
+          // First, so that a listener that asks again is not answered with this failure too.
+          if (neverRan) {
+            this.failAll(neverRanMessage);
+          }
+
+          this.#passOn({ message: event.message ?? '' });
+        },
+      ],
+      ['messageerror', (): void => this.#passOn({ message: '' })],
+    ];
+
+    this.#own.forEach(([type, listener]) =>
+      worker.addEventListener(type, listener)
     );
-    worker.addEventListener('messageerror', (): void =>
-      this.#passOn({ message: '' })
-    );
+  }
+
+  /**
+   * Ends the transport's use: what it listens to on the worker is no longer listened to, each request still waiting is
+   * rejected, and the silence is no longer timed. The worker is left running: ending it is for whoever started it.
+   * What was given to `receive` and `receiveOnce` is stopped by what those returned.
+   */
+  dispose(): void {
+    this.#own
+      .splice(0)
+      .forEach(([type, listener]) =>
+        this.#worker.removeEventListener(type, listener)
+      );
+
+    super.dispose();
   }
 
   // Something went wrong that the worker didn't say, passed on to the error channel's listeners as though the worker

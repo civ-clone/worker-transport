@@ -1,4 +1,6 @@
 import { ParentTransport } from '../ParentTransport';
+import { Request } from '@civ-clone/core-data-client/Request';
+import { startingSilenceFactor } from '@civ-clone/core-data-client/AbstractTransport';
 import { expect } from 'chai';
 
 type Listener = (event: any) => void;
@@ -57,6 +59,25 @@ describe('ParentTransport', (): void => {
 
     expect(once).to.deep.equal([1]);
     expect(never).to.deep.equal([]);
+  });
+
+  it('never times the page’s silence, which is a person choosing, unless told how long', (): void => {
+    const set: number[] = [],
+      timers = {
+        set: (_: () => void, timeout: number): unknown => set.push(timeout),
+        clear: (): void => {},
+      };
+
+    new ParentTransport<any>({ timers }).request(new Request('chooseFromList'));
+
+    expect(set).to.deep.equal([]);
+
+    new ParentTransport<any>({ timers, silenceTimeout: 1_000 }).request(
+      new Request('chooseFromList')
+    );
+
+    // A side that has yet to be heard from is given longer, and this one never says it has heard.
+    expect(set).to.deep.equal([1_000 * startingSilenceFactor]);
   });
 
   it('replies with the id of the request it answers, and sends without one otherwise', (): void => {
