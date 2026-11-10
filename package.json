@@ -1,6 +1,6 @@
 {
   "name": "@civ-clone/worker-transport",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A core-data-client transport over a web worker's messages: the page's end, to the worker it started, and the worker's end, to its page.",
   "repository": "git@github.com:civ-clone/worker-transport.git",
   "keywords": [
