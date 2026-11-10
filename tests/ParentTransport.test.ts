@@ -1,6 +1,9 @@
 import { ParentTransport } from '../ParentTransport';
 import { Request } from '@civ-clone/core-data-client/Request';
-import { startingSilenceFactor } from '@civ-clone/core-data-client/AbstractTransport';
+import {
+  disposedMessage,
+  startingSilenceFactor,
+} from '@civ-clone/core-data-client/AbstractTransport';
 import { expect } from 'chai';
 
 type Listener = (event: any) => void;
@@ -69,15 +72,39 @@ describe('ParentTransport', (): void => {
       };
 
     new ParentTransport<any>({ timers }).request(new Request('chooseFromList'));
-
-    expect(set).to.deep.equal([]);
-
-    new ParentTransport<any>({ timers, silenceTimeout: 1_000 }).request(
+    // A setting that was never set, passed straight on.
+    new ParentTransport<any>({ timers, silenceTimeout: undefined }).request(
       new Request('chooseFromList')
     );
 
-    // A side that has yet to be heard from is given longer, and this one never says it has heard.
+    expect(set).to.deep.equal([]);
+
+    const timed = new ParentTransport<any>({ timers, silenceTimeout: 1_000 });
+
+    timed.request(new Request('chooseFromList'));
+
+    // A side that has yet to be heard from is given longer.
     expect(set).to.deep.equal([1_000 * startingSilenceFactor]);
+
+    // Any message from the page says it is there: timed afresh, and for the usual time from then on.
+    say({ channel: 'anything', data: null });
+
+    expect(set).to.deep.equal([1_000 * startingSilenceFactor, 1_000]);
+  });
+
+  it('disposed of, listens to nothing and rejects what waits', async (): Promise<void> => {
+    const transport = new ParentTransport<any>(),
+      asked = transport
+        .request(new Request('chooseFromList'))
+        .catch((error) => error);
+
+    // Its own, the request's replies and `requestFailed`.
+    expect(listeners.length).to.equal(3);
+
+    transport.dispose();
+
+    expect(listeners.length).to.equal(0);
+    expect((await asked).message).to.equal(disposedMessage);
   });
 
   it('replies with the id of the request it answers, and sends without one otherwise', (): void => {
