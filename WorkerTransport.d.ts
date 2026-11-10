@@ -9,6 +9,7 @@ import AbstractTransport, {
   AbstractTransportOptions,
   RequestFailed,
 } from '@civ-clone/core-data-client/AbstractTransport';
+export declare const neverRanMessage = 'The worker could not be loaded.';
 /** Something went wrong in the worker, or the page's own word that it has gone quiet while requests wait on it. */
 export type WorkerError = {
   message: string;
@@ -36,6 +37,12 @@ export declare class WorkerTransport<
     worker: Worker,
     { rawChannels, errorChannel, ...options }?: WorkerTransportOptions
   );
+  /**
+   * Ends the transport's use: what it listens to on the worker is no longer listened to, each request still waiting is
+   * rejected, and the silence is no longer timed. The worker is left running: ending it is for whoever started it.
+   * What was given to `receive` and `receiveOnce` is stopped by what those returned.
+   */
+  dispose(): void;
   protected requestRejected(error: RequestFailed): void;
   protected notAnswering(): void;
   receive<Channel extends keyof DataMap>(

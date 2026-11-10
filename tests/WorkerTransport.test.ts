@@ -1,4 +1,12 @@
-import { WorkerError, WorkerTransport } from '../WorkerTransport';
+import {
+  WorkerError,
+  WorkerTransport,
+  neverRanMessage,
+} from '../WorkerTransport';
+import {
+  RequestFailed,
+  disposedMessage,
+} from '@civ-clone/core-data-client/AbstractTransport';
 import { Request } from '@civ-clone/core-data-client/Request';
 import { expect } from 'chai';
 
@@ -157,6 +165,98 @@ describe('WorkerTransport', (): void => {
 
     expect((await asked).message).to.equal('no such game');
     expect(heard).to.deep.equal([{ message: 'no such game' }]);
+  });
+
+  it('rejects what waits on a worker whose script could not be loaded, which says so with a bare error', async (): Promise<void> => {
+    const worker = new FakeWorker(),
+      transport = transportFor(worker),
+      heard: WorkerError[] = [],
+      first = transport.request(new Request('options')).catch((error) => error),
+      second = transport
+        .request(new Request('civilizations'))
+        .catch((error) => error);
+
+    // A listener that asks again when told of the failure is not answered with the same failure.
+    let again: Promise<any> | undefined;
+
+    transport.receive('workerError', (data: WorkerError) => {
+      heard.push(data);
+      again ??= transport.request(new Request('options'));
+    });
+    worker.dispatchEvent({ type: 'error' });
+
+    const errors = [await first, await second];
+
+    expect(errors.map((error) => error instanceof RequestFailed)).to.deep.equal(
+      [true, true]
+    );
+    expect(
+      errors.map(({ channel, message }) => [channel, message])
+    ).to.deep.equal([
+      ['options', neverRanMessage],
+      ['civilizations', neverRanMessage],
+    ]);
+    // Said once, as the worker's error: not again for each request.
+    expect(heard).to.deep.equal([{ message: '' }]);
+
+    worker.say({ channel: 'options', data: 'late', id: 3 });
+
+    expect(await again).to.equal('late');
+  });
+
+  it('leaves requests waiting when a worker that has yet to speak throws: it may only not have been asked anything it answers', async (): Promise<void> => {
+    const worker = new FakeWorker(),
+      transport = transportFor(worker),
+      asked = transport.request(new Request('topCities'));
+
+    worker.dispatchEvent({
+      type: 'error',
+      message: 'Uncaught Error: a rule',
+      filename: 'backend.js',
+    });
+    worker.say({ channel: 'topCities', data: ['Karakorum'], id: 1 });
+
+    expect(await asked).to.deep.equal(['Karakorum']);
+  });
+
+  it('leaves requests waiting when a worker that has spoken sends a bare error: it ran', async (): Promise<void> => {
+    const worker = new FakeWorker(),
+      transport = transportFor(worker),
+      asked = transport.request(new Request('topCities'));
+
+    worker.say({ channel: 'ready', data: null });
+    worker.dispatchEvent({ type: 'error' });
+    worker.say({ channel: 'topCities', data: ['Karakorum'], id: 1 });
+
+    expect(await asked).to.deep.equal(['Karakorum']);
+  });
+
+  it('disposed of, listens to nothing on the worker and rejects what waits', async (): Promise<void> => {
+    const worker = new FakeWorker(),
+      transport = transportFor(worker),
+      listening = (): number =>
+        Object.values(worker.listeners).reduce(
+          (total, listeners) => total + listeners.length,
+          0
+        ),
+      asked = transport
+        .request(new Request('topCities'))
+        .catch((error) => error);
+
+    // Its own three, and the request's two: its replies and `requestFailed`.
+    expect(listening()).to.equal(5);
+
+    transport.dispose();
+
+    expect(listening()).to.equal(0);
+    expect((await asked).message).to.equal(disposedMessage);
+
+    const after = await transport
+      .request(new Request('topCities'))
+      .catch((error) => error);
+
+    expect(after.message).to.equal(disposedMessage);
+    expect(worker.posted.length).to.equal(1);
   });
 
   it('says so on the error channel when the worker goes quiet while a request waits, with the timers it is given', async (): Promise<void> => {
