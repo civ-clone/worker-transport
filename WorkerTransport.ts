@@ -11,8 +11,8 @@ import AbstractTransport, {
   AbstractTransportOptions,
   RequestFailed,
 } from '@civ-clone/core-data-client/AbstractTransport';
-import DataObject from '@civ-clone/core-data-object/DataObject';
 import reconstituteData from '@civ-clone/core-data-client/reconstituteData';
+import serialiseDataObjects, { Serialiser } from './serialise';
 
 // What requests waiting on a worker whose script could not be loaded are rejected with.
 export const neverRanMessage = 'The worker could not be loaded.';
@@ -35,15 +35,27 @@ export type WorkerTransportOptions = AbstractTransportOptions & {
    * `WorkerError`s, as though the worker had sent them. `workerError` unless given.
    */
   errorChannel?: PropertyKey;
+  /**
+   * What turns what it is given to send into what it posts: `serialiseDataObjects` unless given, which posts a
+   * `DataObject` as its own `toPlainObject()`, with nothing filtered out (see there).
+   */
+  serialise?: Serialiser;
 };
 
-/** The page's end of a transport over a web worker's messages. */
+/**
+ * The page's end of a transport over a web worker's messages.
+ *
+ * What it is given to send is posted as its `serialise` option makes it. Unless given one, a `DataObject` goes as its
+ * `toPlainObject()`, everything it reaches as every player sees it: a caller that sends what one player may see
+ * serialises it first, with its own registry and filter, or gives the transport a serialiser that does.
+ */
 export class WorkerTransport<
   DataMap extends TransportDataMap
 > extends AbstractTransport<DataMap> {
   #worker: Worker;
   #rawChannels: ReadonlySet<PropertyKey>;
   #errorChannel: PropertyKey;
+  #serialise: Serialiser;
   // Set while the page's own errors go to their listeners, which is not the worker saying anything.
   #passingOn = false;
   // What the transport itself listens to on the worker, by event, for `dispose` to stop.
@@ -54,6 +66,7 @@ export class WorkerTransport<
     {
       rawChannels = [],
       errorChannel = 'workerError',
+      serialise = serialiseDataObjects,
       ...options
     }: WorkerTransportOptions = {}
   ) {
@@ -62,6 +75,7 @@ export class WorkerTransport<
     this.#worker = worker;
     this.#rawChannels = new Set(rawChannels);
     this.#errorChannel = errorChannel;
+    this.#serialise = serialise;
 
     this.#own = [
       // Every message from the worker says it is still there (#470).
@@ -213,13 +227,9 @@ export class WorkerTransport<
     data: TransportSendArgs<DataMap[Channel]>,
     id?: RequestId
   ): void {
-    if ((data as any) instanceof DataObject) {
-      data = data.toPlainObject();
-    }
-
     this.#worker.postMessage({
       channel,
-      data,
+      data: this.#serialise(data),
       ...(id === undefined ? {} : { id }),
     });
   }

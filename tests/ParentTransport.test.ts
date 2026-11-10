@@ -4,7 +4,18 @@ import {
   disposedMessage,
   startingSilenceFactor,
 } from '@civ-clone/core-data-client/AbstractTransport';
+import DataObject from '@civ-clone/core-data-object/DataObject';
 import { expect } from 'chai';
+
+class Thing extends DataObject {
+  name = 'Karakorum';
+
+  constructor() {
+    super();
+
+    this.addKey('name');
+  }
+}
 
 type Listener = (event: any) => void;
 
@@ -116,6 +127,44 @@ describe('ParentTransport', (): void => {
     expect(posted).to.deep.equal([
       { channel: 'topCities', data: ['Karakorum'], id: 3 },
       { channel: 'ready', data: null },
+    ]);
+  });
+
+  it('posts a `DataObject` it is given to send as its plain object, and anything else as it is', (): void => {
+    const transport = new ParentTransport<any>(),
+      thing = new Thing();
+
+    transport.send('city', thing);
+    transport.reply('city', thing, 3);
+    transport.send('city', { name: 'Karakorum' });
+
+    expect(posted).to.deep.equal([
+      { channel: 'city', data: thing.toPlainObject() },
+      { channel: 'city', data: thing.toPlainObject(), id: 3 },
+      { channel: 'city', data: { name: 'Karakorum' } },
+    ]);
+  });
+
+  it('posts what it sends, replies and asks as the serialiser it is given makes it', (): void => {
+    const given: unknown[] = [],
+      transport = new ParentTransport<any>({
+        serialise: (data: unknown) => {
+          given.push(data);
+
+          return 'serialised';
+        },
+      }),
+      thing = new Thing();
+
+    transport.send('city', thing);
+    transport.reply('city', 1, 3);
+    transport.request(new Request('chooseFromList', 5));
+
+    expect(given).to.deep.equal([thing, 1, 5]);
+    expect(posted).to.deep.equal([
+      { channel: 'city', data: 'serialised' },
+      { channel: 'city', data: 'serialised', id: 3 },
+      { channel: 'chooseFromList', data: 'serialised', id: 1 },
     ]);
   });
 });

@@ -10,22 +10,29 @@ var __classPrivateFieldGet = (this && this.__classPrivateFieldGet) || function (
     if (typeof state === "function" ? receiver !== state || !f : !state.has(receiver)) throw new TypeError("Cannot read private member from an object whose class did not declare it");
     return kind === "m" ? f : kind === "a" ? f.call(receiver) : f ? f.value : state.get(receiver);
 };
-var _WorkerTransport_instances, _WorkerTransport_worker, _WorkerTransport_rawChannels, _WorkerTransport_errorChannel, _WorkerTransport_passingOn, _WorkerTransport_own, _WorkerTransport_passOn, _WorkerTransport_payload;
+var _WorkerTransport_instances, _WorkerTransport_worker, _WorkerTransport_rawChannels, _WorkerTransport_errorChannel, _WorkerTransport_serialise, _WorkerTransport_passingOn, _WorkerTransport_own, _WorkerTransport_passOn, _WorkerTransport_payload;
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WorkerTransport = exports.neverRanMessage = void 0;
 const AbstractTransport_1 = require("@civ-clone/core-data-client/AbstractTransport");
-const DataObject_1 = require("@civ-clone/core-data-object/DataObject");
 const reconstituteData_1 = require("@civ-clone/core-data-client/reconstituteData");
+const serialise_1 = require("./serialise");
 // What requests waiting on a worker whose script could not be loaded are rejected with.
 exports.neverRanMessage = 'The worker could not be loaded.';
-/** The page's end of a transport over a web worker's messages. */
+/**
+ * The page's end of a transport over a web worker's messages.
+ *
+ * What it is given to send is posted as its `serialise` option makes it. Unless given one, a `DataObject` goes as its
+ * `toPlainObject()`, everything it reaches as every player sees it: a caller that sends what one player may see
+ * serialises it first, with its own registry and filter, or gives the transport a serialiser that does.
+ */
 class WorkerTransport extends AbstractTransport_1.default {
-    constructor(worker, { rawChannels = [], errorChannel = 'workerError', ...options } = {}) {
+    constructor(worker, { rawChannels = [], errorChannel = 'workerError', serialise = serialise_1.default, ...options } = {}) {
         super(options);
         _WorkerTransport_instances.add(this);
         _WorkerTransport_worker.set(this, void 0);
         _WorkerTransport_rawChannels.set(this, void 0);
         _WorkerTransport_errorChannel.set(this, void 0);
+        _WorkerTransport_serialise.set(this, void 0);
         // Set while the page's own errors go to their listeners, which is not the worker saying anything.
         _WorkerTransport_passingOn.set(this, false);
         // What the transport itself listens to on the worker, by event, for `dispose` to stop.
@@ -33,6 +40,7 @@ class WorkerTransport extends AbstractTransport_1.default {
         __classPrivateFieldSet(this, _WorkerTransport_worker, worker, "f");
         __classPrivateFieldSet(this, _WorkerTransport_rawChannels, new Set(rawChannels), "f");
         __classPrivateFieldSet(this, _WorkerTransport_errorChannel, errorChannel, "f");
+        __classPrivateFieldSet(this, _WorkerTransport_serialise, serialise, "f");
         __classPrivateFieldSet(this, _WorkerTransport_own, [
             // Every message from the worker says it is still there (#470).
             [
@@ -120,18 +128,15 @@ class WorkerTransport extends AbstractTransport_1.default {
         };
     }
     post(channel, data, id) {
-        if (data instanceof DataObject_1.default) {
-            data = data.toPlainObject();
-        }
         __classPrivateFieldGet(this, _WorkerTransport_worker, "f").postMessage({
             channel,
-            data,
+            data: __classPrivateFieldGet(this, _WorkerTransport_serialise, "f").call(this, data),
             ...(id === undefined ? {} : { id }),
         });
     }
 }
 exports.WorkerTransport = WorkerTransport;
-_WorkerTransport_worker = new WeakMap(), _WorkerTransport_rawChannels = new WeakMap(), _WorkerTransport_errorChannel = new WeakMap(), _WorkerTransport_passingOn = new WeakMap(), _WorkerTransport_own = new WeakMap(), _WorkerTransport_instances = new WeakSet(), _WorkerTransport_passOn = function _WorkerTransport_passOn(error) {
+_WorkerTransport_worker = new WeakMap(), _WorkerTransport_rawChannels = new WeakMap(), _WorkerTransport_errorChannel = new WeakMap(), _WorkerTransport_serialise = new WeakMap(), _WorkerTransport_passingOn = new WeakMap(), _WorkerTransport_own = new WeakMap(), _WorkerTransport_instances = new WeakSet(), _WorkerTransport_passOn = function _WorkerTransport_passOn(error) {
     __classPrivateFieldSet(this, _WorkerTransport_passingOn, true, "f");
     try {
         __classPrivateFieldGet(this, _WorkerTransport_worker, "f").dispatchEvent(new MessageEvent('message', {

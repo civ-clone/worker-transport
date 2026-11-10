@@ -9,6 +9,7 @@ import AbstractTransport, {
   AbstractTransportOptions,
   RequestFailed,
 } from '@civ-clone/core-data-client/AbstractTransport';
+import { Serialiser } from './serialise';
 export declare const neverRanMessage = 'The worker could not be loaded.';
 /** Something went wrong in the worker, or the page's own word that it has gone quiet while requests wait on it. */
 export type WorkerError = {
@@ -27,15 +28,31 @@ export type WorkerTransportOptions = AbstractTransportOptions & {
    * `WorkerError`s, as though the worker had sent them. `workerError` unless given.
    */
   errorChannel?: PropertyKey;
+  /**
+   * What turns what it is given to send into what it posts: `serialiseDataObjects` unless given, which posts a
+   * `DataObject` as its own `toPlainObject()`, with nothing filtered out (see there).
+   */
+  serialise?: Serialiser;
 };
-/** The page's end of a transport over a web worker's messages. */
+/**
+ * The page's end of a transport over a web worker's messages.
+ *
+ * What it is given to send is posted as its `serialise` option makes it. Unless given one, a `DataObject` goes as its
+ * `toPlainObject()`, everything it reaches as every player sees it: a caller that sends what one player may see
+ * serialises it first, with its own registry and filter, or gives the transport a serialiser that does.
+ */
 export declare class WorkerTransport<
   DataMap extends TransportDataMap
 > extends AbstractTransport<DataMap> {
   #private;
   constructor(
     worker: Worker,
-    { rawChannels, errorChannel, ...options }?: WorkerTransportOptions
+    {
+      rawChannels,
+      errorChannel,
+      serialise,
+      ...options
+    }?: WorkerTransportOptions
   );
   /**
    * Ends the transport's use: what it listens to on the worker is no longer listened to, each request still waiting is
